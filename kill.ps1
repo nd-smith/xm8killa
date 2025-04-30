@@ -695,3 +695,559 @@ function Remove-XactimateMSIProducts {
                             $keys = Get-ChildItem -Path $path -ErrorAction SilentlyContinue
                             
                             foreach ($key in $keys) {
+                            $match = $false
+                                
+                                # Check if key name contains product code
+                                if ($key.PSPath -like "*$codeNoFormat*") {
+                                    $match = $true
+                                }
+                                else {
+                                    # Check if any values contain the product code
+                                    $properties = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+                                    if ($properties) {
+                                        foreach ($prop in $properties.PSObject.Properties) {
+                                            if ($prop.Value -is [string] -and $prop.Value -like "*$codeNoFormat*") {
+                                                $match = $true
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if ($match) {
+                                    try {
+                                        Remove-Item -Path $key.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                                        Write-Log "Removed registry key containing product code: $($key.PSPath)" -Level "SUCCESS"
+                                    }
+                                    catch {
+                                        Write-Log "Failed to remove registry key: $($key.PSPath) - $_" -Level "ERROR"
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Log "Error searching registry path $path for product code $code: $_" -Level "ERROR"
+                        }
+                    }
+                }
+            }
+        }
+        
+        Write-Log "MSI product removal completed." -Level "SUCCESS"
+    }
+    catch {
+        Write-Log "Error removing MSI products: $_" -Level "ERROR"
+        # Continue execution despite errors
+    }
+}
+
+function Remove-CompanyXactimateRegistry {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CompanyName
+    )
+    
+    Write-Log "Removing Xactimate registry keys from company locations..." -Level "INFO"
+    
+    try {
+        # Search and remove company package registry keys
+        $companyPackagePaths = @(
+            "HKLM:\SOFTWARE\$CompanyName\Packages",
+            "HKLM:\SOFTWARE\WOW6432Node\$CompanyName\Packages"
+        )
+        
+        foreach ($basePath in $companyPackagePaths) {
+            if (Test-Path $basePath) {
+                Write-Log "Searching for Xactimate registry keys in: $basePath" -Level "INFO"
+                
+                $keys = Get-ChildItem -Path $basePath -ErrorAction SilentlyContinue | 
+                    Where-Object { 
+                        $_.PSPath -like "*Xactware*" -or 
+                        $_.PSPath -like "*Xactimate*" 
+                    }
+                
+                foreach ($key in $keys) {
+                    if ($DryRun) {
+                        Write-Log "DRY RUN: Would remove registry key: $($key.PSPath)" -Level "INFO"
+                    }
+                    else {
+                        try {
+                            Remove-Item -Path $key.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                            Write-Log "Removed registry key: $($key.PSPath)" -Level "SUCCESS"
+                        }
+                        catch {
+                            Write-Log "Failed to remove registry key: $($key.PSPath) - $_" -Level "ERROR"
+                        }
+                    }
+                }
+            }
+            else {
+                Write-Log "Registry path not found: $basePath" -Level "INFO"
+            }
+        }
+        
+        Write-Log "Company registry cleanup completed." -Level "SUCCESS"
+        return $true
+    }
+    catch {
+        Write-Log "Error removing company registry keys: $_" -Level "ERROR"
+        # Continue execution despite errors
+        return $false
+    }
+}
+
+function Remove-XactimateRegistry {
+    Write-Log "Removing Xactimate registry keys..." -Level "INFO"
+    
+    try {
+        # 1. Remove company-specific registry entries
+        Remove-CompanyXactimateRegistry -CompanyName $CompanyName
+        
+        # 2. Remove Xactware software keys
+        $xactwarePaths = @(
+            "HKLM:\SOFTWARE\Xactware",
+            "HKLM:\SOFTWARE\WOW6432Node\Xactware"
+        )
+        
+        foreach ($path in $xactwarePaths) {
+            if (Test-Path $path) {
+                if ($DryRun) {
+                    Write-Log "DRY RUN: Would remove registry key: $path" -Level "INFO"
+                }
+                else {
+                    try {
+                        Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+                        Write-Log "Removed registry key: $path" -Level "SUCCESS"
+                    }
+                    catch {
+                        Write-Log "Failed to remove registry key: $path - $_" -Level "ERROR"
+                    }
+                }
+            }
+            else {
+                Write-Log "Registry key not found: $path" -Level "INFO"
+            }
+        }
+        
+        # 3. Search and remove COM registrations
+        $comPaths = @(
+            "HKLM:\SOFTWARE\Classes\CLSID",
+            "HKLM:\SOFTWARE\WOW6432Node\Classes\CLSID"
+        )
+        
+        Write-Log "Searching for Xactimate COM registrations..." -Level "INFO"
+        
+        foreach ($path in $comPaths) {
+            if (Test-Path $path) {
+                # Get all properties containing Xactware or Xactimate
+                $comKeys = Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue | 
+                    Get-ItemProperty -ErrorAction SilentlyContinue | 
+                    Where-Object { 
+                        ($_.PSChildName -like "*Xactware*" -or $_.PSChildName -like "*Xactimate*") -or
+                        (($_ | Out-String) -like "*Xactware*" -or ($_ | Out-String) -like "*Xactimate*")
+                    }
+                
+                foreach ($comKey in $comKeys) {
+                    if ($DryRun) {
+                        Write-Log "DRY RUN: Would remove COM registration: $($comKey.PSPath)" -Level "INFO"
+                    }
+                    else {
+                        try {
+                            Remove-Item -Path $comKey.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                            Write-Log "Removed COM registration: $($comKey.PSPath)" -Level "SUCCESS"
+                        }
+                        catch {
+                            Write-Log "Failed to remove COM registration: $($comKey.PSPath) - $_" -Level "ERROR"
+                        }
+                    }
+                }
+            }
+        }
+        
+        Write-Log "Registry cleanup completed." -Level "SUCCESS"
+    }
+    catch {
+        Write-Log "Error removing registry keys: $_" -Level "ERROR"
+        # Continue execution despite errors
+    }
+}
+
+function Remove-XactimateProgramData {
+    Write-Log "Removing Xactimate program data and shortcuts..." -Level "INFO"
+    
+    try {
+        # Program files and ProgramData locations
+        $programLocations = @(
+            "C:\Program Files\Xactware",
+            "C:\ProgramData\Xactware"
+        )
+        
+        foreach ($location in $programLocations) {
+            if (Test-Path $location) {
+                if ($DryRun) {
+                    Write-Log "DRY RUN: Would remove directory: $location" -Level "INFO"
+                }
+                else {
+                    Remove-Item -Path $location -Recurse -Force -ErrorAction SilentlyContinue
+                    
+                    if (-not (Test-Path $location)) {
+                        Write-Log "Removed directory: $location" -Level "SUCCESS"
+                    }
+                    else {
+                        Write-Log "Failed to completely remove: $location" -Level "WARNING"
+                        # Try to remove files individually
+                        Get-ChildItem -Path $location -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+            else {
+                Write-Log "Directory not found: $location" -Level "INFO"
+            }
+        }
+        
+        # Get all user profile desktop folders
+        $shortcutLocations = @(
+            "$env:PUBLIC\Desktop",  # All Users desktop
+            "$env:USERPROFILE\Desktop",  # Current user desktop
+            "$env:PUBLIC\Start Menu\Programs",  # All Users start menu
+            "$env:USERPROFILE\AppData\Roaming\Microsoft\Windows\Start Menu\Programs"  # Current user start menu
+        )
+        
+        # Also get all other user desktop folders
+        $userProfiles = Get-ChildItem -Path "$env:SystemDrive\Users" -Directory -ErrorAction SilentlyContinue | 
+            Where-Object { $_.Name -ne "Public" -and $_.Name -ne "Default" -and $_.Name -ne "Default User" }
+        
+        foreach ($profile in $userProfiles) {
+            $desktopPath = Join-Path -Path $profile.FullName -ChildPath "Desktop"
+            $startMenuPath = Join-Path -Path $profile.FullName -ChildPath "AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+            
+            if (Test-Path $desktopPath) {
+                $shortcutLocations += $desktopPath
+            }
+            
+            if (Test-Path $startMenuPath) {
+                $shortcutLocations += $startMenuPath
+            }
+        }
+        
+        # Look for shortcuts - be very specific with the patterns
+        $shortcutPatterns = @("Xactimate*.lnk", "Xactware*.lnk")
+        
+        foreach ($location in $shortcutLocations) {
+            if (Test-Path $location) {
+                foreach ($pattern in $shortcutPatterns) {
+                    $shortcuts = Get-ChildItem -Path $location -Filter $pattern -ErrorAction SilentlyContinue
+                    
+                    foreach ($shortcut in $shortcuts) {
+                        # Additional verification to ensure we're only removing Xactimate-related shortcuts
+                        $isXactimateShortcut = $false
+                        
+                        # Check the shortcut target path if possible
+                        try {
+                            $shell = New-Object -ComObject WScript.Shell
+                            $target = $shell.CreateShortcut($shortcut.FullName).TargetPath
+                            if ($target -like "*Xactware*" -or $target -like "*Xactimate*") {
+                                $isXactimateShortcut = $true
+                            }
+                        }
+                        catch {
+                            # If we can't check the target, verify by name only
+                            if ($shortcut.Name -like "Xactimate*" -or $shortcut.Name -like "Xactware*") {
+                                $isXactimateShortcut = $true
+                            }
+                        }
+                        
+                        if ($isXactimateShortcut) {
+                            if ($DryRun) {
+                                Write-Log "DRY RUN: Would remove shortcut: $($shortcut.FullName)" -Level "INFO"
+                            }
+                            else {
+                                Remove-Item -Path $shortcut.FullName -Force -ErrorAction SilentlyContinue
+                                Write-Log "Removed shortcut: $($shortcut.FullName)" -Level "SUCCESS"
+                            }
+                        }
+                        else {
+                            Write-Log "Skipping shortcut (not Xactimate-related): $($shortcut.FullName)" -Level "INFO"
+                        }
+                    }
+                }
+            }
+        }
+        
+        Write-Log "Program data and shortcut cleanup completed." -Level "SUCCESS"
+    }
+    catch {
+        Write-Log "Error removing program data: $_" -Level "ERROR"
+        # Continue execution despite errors
+    }
+}
+
+function Remove-XactimateUserProfiles {
+    Write-Log "Cleaning Xactimate from user profiles..." -Level "INFO"
+    
+    try {
+        # User profile locations
+        $profileLocations = @(
+            "$env:SystemDrive\Users\*\AppData\Local\Xactimate",
+            "$env:SystemDrive\Users\*\AppData\Local\Xactware",
+            "$env:SystemDrive\Users\*\AppData\Roaming\Xactimate",
+            "$env:SystemDrive\Users\*\AppData\Roaming\Xactware",
+            "$env:SystemDrive\Users\*\AppData\LocalLow\Xactimate",
+            "$env:SystemDrive\Users\*\AppData\LocalLow\Xactware"
+        )
+        
+        # Also add SystemTemp
+        $profileLocations += "$env:SystemRoot\Temp\Xactimate"
+        $profileLocations += "$env:SystemRoot\Temp\Xactware"
+        
+        foreach ($location in $profileLocations) {
+            $dirs = Get-ChildItem -Path $location -ErrorAction SilentlyContinue
+            
+            if ($dirs) {
+                foreach ($dir in $dirs) {
+                    if ($DryRun) {
+                        Write-Log "DRY RUN: Would remove user profile data: $($dir.FullName)" -Level "INFO"
+                    }
+                    else {
+                        Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                        Write-Log "Removed user profile data: $($dir.FullName)" -Level "SUCCESS"
+                    }
+                }
+            }
+            else {
+                Write-Log "No user profile data found at: $location" -Level "INFO"
+            }
+        }
+    }
+    catch {
+        Write-Log "Error cleaning user profiles: $_" -Level "ERROR"
+        # Continue execution despite errors
+    }
+}
+
+function Remove-PackageCache {
+    Write-Log "Removing Xactimate entries from Package Cache..." -Level "INFO"
+    
+    try {
+        $packageCachePath = "C:\ProgramData\Package Cache"
+        
+        if (Test-Path $packageCachePath) {
+            Write-Log "Searching for product codes in Package Cache..." -Level "INFO"
+            
+            # Get all subdirectories in the Package Cache
+            $cacheDirectories = Get-ChildItem -Path $packageCachePath -Directory -ErrorAction SilentlyContinue
+            
+            $matchesFound = 0
+            
+            # For each product code we've identified
+            foreach ($code in $ProductCodes) {
+                # Format the code for comparison (remove braces)
+                $codeNoFormat = $code -replace "[{}]", ""
+                
+                # Look for exact matches in the Package Cache
+                $matchingDirs = $cacheDirectories | Where-Object { 
+                    $_.Name -eq $code -or 
+                    $_.Name -eq $codeNoFormat -or
+                    $_.Name -like "*$codeNoFormat*"
+                }
+                
+                foreach ($dir in $matchingDirs) {
+                    if ($DryRun) {
+                        Write-Log "DRY RUN: Would remove Package Cache entry: $($dir.FullName)" -Level "INFO"
+                    }
+                    else {
+                        try {
+                            Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                            
+                            if (-not (Test-Path $dir.FullName)) {
+                                Write-Log "Removed Package Cache entry: $($dir.FullName)" -Level "SUCCESS"
+                                $matchesFound++
+                            }
+                            else {
+                                Write-Log "Failed to completely remove Package Cache entry: $($dir.FullName)" -Level "WARNING"
+                                # Try to remove files individually
+                                Get-ChildItem -Path $dir.FullName -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+                            }
+                        }
+                        catch {
+                            Write-Log "Error removing Package Cache entry: $($dir.FullName) - $_" -Level "ERROR"
+                        }
+                    }
+                }
+            }
+            
+            if ($matchesFound -eq 0) {
+                Write-Log "No matching Package Cache entries found for Xactimate product codes." -Level "INFO"
+            }
+            else {
+                Write-Log "Removed $matchesFound Package Cache entries." -Level "SUCCESS"
+            }
+        }
+        else {
+            Write-Log "Package Cache directory not found: $packageCachePath" -Level "INFO"
+        }
+        
+        Write-Log "Package Cache cleanup completed." -Level "SUCCESS"
+    }
+    catch {
+        Write-Log "Error removing Package Cache entries: $_" -Level "ERROR"
+        # Continue execution despite errors
+    }
+}
+
+function Compress-XactimateBackup {
+    if (-not $CreateZip) {
+        Write-Log "Zip creation is disabled. Skipping." -Level "INFO"
+        return
+    }
+    
+    Write-Log "Compressing backup directory..." -Level "INFO"
+    
+    try {
+        $zipPath = "$BackupRoot\xm8rip.$timestamp.zip"
+        
+        if ($DryRun) {
+            Write-Log "DRY RUN: Would compress $backupDir to $zipPath" -Level "INFO"
+            return $zipPath
+        }
+        
+        if (Test-Path $backupDir) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($backupDir, $zipPath)
+            
+            if (Test-Path $zipPath) {
+                Write-Log "Backup compressed to: $zipPath" -Level "SUCCESS"
+                return $zipPath
+            }
+            else {
+                Write-Log "Failed to create zip file." -Level "ERROR"
+                return $null
+            }
+        }
+        else {
+            Write-Log "Backup directory not found: $backupDir" -Level "WARNING"
+            return $null
+        }
+    }
+    catch {
+        Write-Log "Error compressing backup: $_" -Level "ERROR"
+        return $null
+    }
+}
+
+function Send-XactimateBackupEmail {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ZipPath
+    )
+    
+    if (-not $SendEmail) {
+        Write-Log "Email is disabled. Skipping." -Level "INFO"
+        return
+    }
+    
+    if ([string]::IsNullOrEmpty($EmailTo)) {
+        Write-Log "No email recipient specified. Skipping." -Level "WARNING"
+        return
+    }
+    
+    Write-Log "Preparing to email backup..." -Level "INFO"
+    
+    try {
+        if ($DryRun) {
+            Write-Log "DRY RUN: Would email $ZipPath to $EmailTo" -Level "INFO"
+            return
+        }
+        
+        if (Test-Path $ZipPath) {
+            $fileSize = (Get-Item $ZipPath).Length / 1MB
+            
+            if ($fileSize -gt $MaxEmailSize -and $UseFallback) {
+                Write-Log "Zip file size ($fileSize MB) exceeds maximum email size ($MaxEmailSize MB). Using fallback method." -Level "WARNING"
+                # Fallback method would be implemented here
+                return
+            }
+            elseif ($fileSize -gt $MaxEmailSize) {
+                Write-Log "Zip file size ($fileSize MB) exceeds maximum email size ($MaxEmailSize MB). Email not sent." -Level "WARNING"
+                return
+            }
+            
+            # Create Outlook COM object
+            $outlook = New-Object -ComObject Outlook.Application
+            $mail = $outlook.CreateItem(0) # olMailItem
+            
+            # Set email properties
+            $mail.Subject = "Xactimate Cleanup Backup - $timestamp"
+            $mail.Body = "Attached is the backup from Xactimate cleanup script run on $timestamp."
+            $mail.To = $EmailTo
+            
+            # Add attachment
+            $mail.Attachments.Add($ZipPath)
+            
+            # Display the email (user must click Send)
+            $mail.Display()
+            
+            Write-Log "Email prepared with backup attachment. User must click Send." -Level "SUCCESS"
+        }
+        else {
+            Write-Log "Zip file not found: $ZipPath" -Level "ERROR"
+        }
+    }
+    catch {
+        Write-Log "Error preparing email: $_" -Level "ERROR"
+    }
+}
+
+#endregion
+
+#region Main Execution
+
+# Script entry point
+Write-Log "XM8RIP - Xactimate Cleanup Utility started. DryRun: $DryRun" -Level "INFO"
+
+# Check admin rights
+Test-AdminRights
+
+# Create the backup folders
+Create-BackupFolders
+
+# Step 1: Back up logs
+Backup-XactimateLogs
+Backup-PKGLOGFiles
+
+# Step 2: Stop Xactimate processes
+Stop-XactimateProcesses
+
+# Step 3: Get product codes
+$productCodes = Get-XactimateMSIProductCodes
+
+# Step 4: Back up registry and program data before uninstall
+Backup-XactimateRegistry
+Backup-XactimateProgramData
+
+# Step 5: Attempt MSI uninstall
+Remove-XactimateMSIProducts -ProductCodes $productCodes
+
+# Step 6: Registry cleanup
+Remove-CompanyXactimateRegistry -CompanyName $CompanyName
+Remove-XactimateRegistry
+
+# Step 7: Remove program data and shortcuts
+Remove-XactimateProgramData
+
+# Step 8: Clean user profiles
+Remove-XactimateUserProfiles
+
+# Step 9: Remove Package Cache entries
+Remove-PackageCache
+
+# Step 10: Compress backup if needed
+$zipPath = Compress-XactimateBackup
+
+# Step 11: Send email if needed
+if ($zipPath) {
+    Send-XactimateBackupEmail -ZipPath $zipPath
+}
+
+Write-Log "XM8RIP - Xactimate Cleanup Utility completed successfully." -Level "SUCCESS"
+#endregion
