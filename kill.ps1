@@ -69,12 +69,8 @@ $backupLogs = "$backupDir\logs"
 # Define common registry paths for reuse across functions
 $msiRegistryPaths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products",
-    "HKLM:\SOFTWARE\Classes\Installer\Products",
-    "HKLM:\SOFTWARE\Classes\Installer\UpgradeCodes",
-    "HKLM:\SOFTWARE\Classes\Installer\Features",
-    "HKLM:\SOFTWARE\Classes\Installer\Dependencies"
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",    
+    "HKLM:\SOFTWARE\Classes\Installer"    
 )
 
 #region Helper Functions
